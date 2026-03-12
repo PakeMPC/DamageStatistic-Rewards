@@ -9,64 +9,170 @@ using TShockAPI;
 
 namespace DamageStatistic
 {
+    public class BossRecord
+    {
+        public int NpcId;
+        public DateTime StartTime;
+        public Dictionary<string, int> PlayerDamage = new Dictionary<string, int>();
+    }
+
+    public class PlayerDamageRecord
+    {
+        public string Name;
+        public int Damage;
+    }
+
     [ApiVersion(2, 1)]
     public class DamageStatistic : TerrariaPlugin
     {
-        public override string Name => "DamageStatistic-伤害统计";
-        public override Version Version => new Version(1, 0);
-        public override string Author => "Megghy";
-        public override string Description => "Show the damage caused by each player after each boss battle";
-        public DamageStatistic(Main game) : base(game)
-        {
+        public override string Name => "DamageStatistic&Rewards";
+        public override Version Version => new Version(2, 0);
+        public override string Author => "Megghy & PakeMPC";
+        public override string Description => "Show the damage caused by each player after each boss battle and gives rewards";
 
-        }
+        private Dictionary<int, BossRecord> ActiveBosses = new Dictionary<int, BossRecord>();
+
+        public DamageStatistic(Main game) : base(game) { }
+
         public override void Initialize()
         {
-            ServerApi.Hooks.NpcSpawn.Register(this, OnNpcSpawn);
+            DamageConfigJson.Load();
             ServerApi.Hooks.NpcStrike.Register(this, OnStrike);
             ServerApi.Hooks.NpcKilled.Register(this, OnNpcKill);
+            ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
+            Commands.ChatCommands.Add(new Command("damagestatistic.lang", LangCmd, "damagelang"));
         }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                ServerApi.Hooks.NpcSpawn.Deregister(this, OnNpcSpawn);
                 ServerApi.Hooks.NpcStrike.Deregister(this, OnStrike);
                 ServerApi.Hooks.NpcKilled.Deregister(this, OnNpcKill);
-                DamageList.Clear();
+                ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
+                ActiveBosses.Clear();
             }
             base.Dispose(disposing);
         }
 
-        private readonly Dictionary<NPC, Dictionary<string, double>> DamageList = new Dictionary<NPC, Dictionary<string, double>>();
-
-        private void OnNpcSpawn(NpcSpawnEventArgs args)
+        private void LangCmd(CommandArgs args)
         {
-            NPC npc = Main.npc[args.NpcId];
-            if (npc.boss) DamageList.Add(npc, new Dictionary<string, double>());
+            if (args.Parameters.Count > 0)
+                DamageRewardsi18s.ChangeLanguage(args.Player, args.Parameters[0].ToLower());
+            else
+                args.Player.SendErrorMessage("Uso: /damagelang <es|en|pt>");
+        }
+
+        private void OnUpdate(EventArgs args)
+        {
+            if (Main.GameUpdateCount % 300 != 0) return;
+
+            var keys = ActiveBosses.Keys.ToList();
+            foreach (var k in keys)
+            {
+                if (!Main.npc[k].active || (!Main.npc[k].boss && !IsBossPart(Main.npc[k])))
+                {
+                    ActiveBosses.Remove(k);
+                }
+            }
         }
 
         private void OnStrike(NpcStrikeEventArgs args)
         {
-            if (DamageList.ContainsKey(args.Npc))
+            if (args.Npc == null || !args.Npc.active || (!args.Npc.boss && !IsBossPart(args.Npc))) return;
+
+            if (!ActiveBosses.TryGetValue(args.Npc.whoAmI, out var tracker))
             {
-                if (!DamageList[args.Npc].ContainsKey(args.Player.name)) DamageList[args.Npc].Add(args.Player.name, 0);
-                DamageList[args.Npc][args.Player.name] += args.Damage;
+                // Inicia el contador para el DPS
+                tracker = new BossRecord { NpcId = args.Npc.whoAmI, StartTime = DateTime.UtcNow };
+                ActiveBosses[args.Npc.whoAmI] = tracker;
             }
+
+            string pName = args.Player.name;
+            if (!tracker.PlayerDamage.ContainsKey(pName)) tracker.PlayerDamage[pName] = 0;
+            tracker.PlayerDamage[pName] += args.Damage;
         }
 
         private void OnNpcKill(NpcKilledEventArgs args)
         {
-            if (DamageList.ContainsKey(args.npc) && DamageList[args.npc].Any())
+            if (args.npc == null) return;
+            if (ActiveBosses.TryGetValue(args.npc.whoAmI, out var tracker))
             {
-                var data = DamageList[args.npc];
-                double npcLifeMax = 0;
-                data.ForEach(p => npcLifeMax += data[p.Key]);
-                var text = new StringBuilder();
-                data.Keys.ForEach(p => text.Append($"{p}: [c/74F3C9:{data[p]}] <{data[p] / npcLifeMax:0.00%}>, "));
-                TShock.Utils.Broadcast($"[c/74F3C9:{data.Count}] 位玩家击败了 [c/74F3C9:{args.npc.FullName}]\n{text}", new Color(247, 244, 150));
-                DamageList.Remove(args.npc);
+                ProcessBossKill(args.npc, tracker);
+                ActiveBosses.Remove(args.npc.whoAmI);
             }
+        }
+
+        private void ProcessBossKill(NPC npc, BossRecord tracker)
+        {
+            if (!DamageConfigJson.Config.ShowDamage) return;
+
+            double totalDamage = tracker.PlayerDamage.Values.Sum();
+            if (totalDamage <= 0) return;
+
+            double totalSeconds = (DateTime.UtcNow - tracker.StartTime).TotalSeconds;
+            if (totalSeconds < 1) totalSeconds = 1;
+
+            var onlineRecords = tracker.PlayerDamage
+                .Where(kvp => kvp.Value > 0 && TShock.Players.Any(p => p != null && p.Active && p.Name == kvp.Key))
+                .Select(kvp => new PlayerDamageRecord { Name = kvp.Key, Damage = kvp.Value })
+                .OrderBy(x => x.Damage)
+                .ToList();
+
+            if (onlineRecords.Count == 0) return;
+
+            // Transmitir estadísticas
+            foreach (var player in TShock.Players.Where(p => p != null && p.Active))
+            {
+                for (int i = 0; i < onlineRecords.Count; i++)
+                {
+                    int rank = onlineRecords.Count - i;
+                    var rec = onlineRecords[i];
+                    double pct = (rec.Damage / totalDamage) * 100;
+                    int dps = (int)(rec.Damage / totalSeconds);
+
+                    string nameFmt = rec.Name;
+                    if (rank == 1) nameFmt = Rainbow(rec.Name);
+                    else if (rank == 2) nameFmt = $"[c/808080:{rec.Name}]";
+                    else if (rank == 3) nameFmt = $"[c/FFA500:{rec.Name}]";
+
+                    if (rank <= 3)
+                    {
+                        string key = $"RANK_{rank}";
+                        player.SendMessage(DamageRewardsi18s.GetText(player, key, nameFmt, rec.Damage, pct.ToString("0.00"), dps), Color.White);
+                    }
+                    else
+                    {
+                        player.SendMessage(DamageRewardsi18s.GetText(player, "RANK_FORMAT", rank, nameFmt, rec.Damage, pct.ToString("0.00"), dps), Color.White);
+                    }
+                }
+                player.SendMessage(DamageRewardsi18s.GetText(player, "TOP_DAMAGE_HEADER", npc.FullName.ToUpper()), Color.LimeGreen);
+            }
+
+            // Procesar Recompensas
+            if (DamageConfigJson.Config.DamageReward)
+            {
+                DamageRewards.CalculateAndGiveRewards(npc, onlineRecords, totalDamage);
+            }
+        }
+
+        private bool IsBossPart(NPC npc)
+        {
+            // Partes del Eater of Worlds y otros que TShock a veces no marca como jefe principal
+            return npc.type == 13 || npc.type == 14 || npc.type == 15 || npc.type == 398;
+        }
+
+        // Utilidad para imprimir el color arcoíris
+        private string Rainbow(string text)
+        {
+            string[] colors = { "FF0000", "FF7F00", "FFFF00", "00FF00", "0000FF", "4B0082", "9400D3" };
+            var sb = new StringBuilder();
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (text[i] == ' ') sb.Append(" ");
+                else sb.Append($"[c/{colors[i % colors.Length]}:{text[i]}]");
+            }
+            return sb.ToString();
         }
     }
 }
