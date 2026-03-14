@@ -15,6 +15,7 @@ namespace DamageStatistic
         public int Top2Percent { get; set; } = 30;
         public int Top1Percent { get; set; } = 60;
         public int MaxDamagePercent { get; set; } = 80;
+        public string DefaultLanguage { get; set; } = "en";
         public Dictionary<string, string> PlayerLanguages { get; set; } = new Dictionary<string, string>();
     }
 
