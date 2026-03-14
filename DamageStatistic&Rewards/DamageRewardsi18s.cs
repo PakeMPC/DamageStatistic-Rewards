@@ -14,8 +14,8 @@ namespace DamageStatistic
                 { "RANK_3", "3[i:4599] {0} {1} ({2}%) (DPS:{3})" },
                 { "RANK_2", "2[i:4600] {0} {1} ({2}%) (DPS:{3})" },
                 { "RANK_1", "1[i:4601] {0} {1} ({2}%) (DPS:{3})" },
-                { "TOP_DAMAGE_HEADER", "--[i:4601]TOP DA—O A {0}[i:4601]--" },
-                { "NO_REWARD_OVER_DAMAGE", "Sin recompensas: LÌmite de farmeo de daÒo excedido." },
+                { "TOP_DAMAGE_HEADER", "--[i:4601]TOP DA√ëO A {0}[i:4601]--" },
+                { "NO_REWARD_OVER_DAMAGE", "Sin recompensas: L√≠mite de farmeo de da√±o excedido." },
                 { "REWARD_RECEIVED", "Recompensa de {0} por quedar en top {1}." },
                 { "LANG_CHANGED", "Idioma cambiado a {0}." }
             },
@@ -34,20 +34,34 @@ namespace DamageStatistic
                 { "RANK_3", "3[i:4599] {0} {1} ({2}%) (DPS:{3})" },
                 { "RANK_2", "2[i:4600] {0} {1} ({2}%) (DPS:{3})" },
                 { "RANK_1", "1[i:4601] {0} {1} ({2}%) (DPS:{3})" },
-                { "TOP_DAMAGE_HEADER", "--[i:4601]DANO M¡XIMO PARA {0}[i:4601]--" },
+                { "TOP_DAMAGE_HEADER", "--[i:4601]DANO M√ÅXIMO PARA {0}[i:4601]--" },
                 { "NO_REWARD_OVER_DAMAGE", "Sem recompensas: Limite de dano excedido." },
                 { "REWARD_RECEIVED", "Recompensa de {0} por ficar no top {1}." },
                 { "LANG_CHANGED", "Idioma alterado para {0}." }
             }
         };
 
+
         public static string GetText(TSPlayer player, string key, params object[] args)
         {
-            string lang = "en";
-            if (player?.Account != null && PlayerLanguages.TryGetValue(player.Account.Name, out string pLang)) lang = pLang;
+            string lang = DamageConfigJson.Config.DefaultLanguage;
+
+            if (player?.Account != null && PlayerLanguages.TryGetValue(player.Account.Name, out string pLang))
+            {
+                lang = pLang;
+            }
+
+            if (!Languages.ContainsKey(lang))
+            {
+                lang = "en";
+            }
+
             if (Languages.ContainsKey(lang) && Languages[lang].ContainsKey(key))
+            {
                 return string.Format(Languages[lang][key], args);
-            return key;
+            }
+
+            return key; 
         }
 
         public static void ChangeLanguage(TSPlayer player, string lang)
