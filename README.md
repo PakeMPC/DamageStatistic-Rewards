@@ -33,7 +33,8 @@ Al iniciar el plugin por primera vez, se generará el archivo de configuración 
   "Top2Percent": 30, // porcentaje de recompensa que obtendrá el top 2
   "Top1Percent": 60, // porcentaje de recompensa que obtendrá el top 1
   "MaxDamagePercent": 80, // daño máximo para recibir recompensa. Si alguien hace más del 80%, se anula
-  "PlayerLanguages": {} // idioma en que cada jugador tiene el mod
+  "DefaultLanguage": "es", //Idioma por defecto del plugin
+  "PlayerLanguages": {} // idioma en que cada jugador tiene el plugin
 }
 ```
 
@@ -73,6 +74,7 @@ When starting the plugin for the first time, the configuration file will be gene
   "Top2Percent": 30, // reward percentage that the top 2 will get
   "Top1Percent": 60, // reward percentage that the top 1 will get
   "MaxDamagePercent": 80, // maximum damage percentage. If a player deals more than 80%, rewards are canceled
-  "PlayerLanguages": {} // language each player has set for the mod
+  "DefaultLanguage": "en", //default plugin language
+  "PlayerLanguages": {} // language each player has set for the plugin
 }
 ```
