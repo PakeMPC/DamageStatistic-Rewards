@@ -12,8 +12,8 @@ namespace DamageStatistic
         {
             if (!DamageConfigJson.Config.DamageReward || records.Count == 0) return;
 
-            // Verificar si alguien hizo más del MaxDamagePercent
-            bool abuse = records.Any(r => (r.Damage / totalDamage * 100) >= DamageConfigJson.Config.MaxDamagePercent);
+            // Verificar si alguien hizo mÃ¡s del MaxDamagePercent
+            bool abuse = records.Any(r => (r.Damage / totalDamage * 100) > DamageConfigJson.Config.MaxDamagePercent);
 
             if (abuse)
             {
