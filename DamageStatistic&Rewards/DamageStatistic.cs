@@ -1,4 +1,4 @@
-﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -41,6 +41,14 @@ namespace DamageStatistic
             ServerApi.Hooks.NpcKilled.Register(this, OnNpcKill);
             ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
             Commands.ChatCommands.Add(new Command("damagestatistic.lang", LangCmd, "damagelang"));
+            TShockAPI.Hooks.GeneralHooks.ReloadEvent += OnReload;
+        }
+
+        private void OnReload(TShockAPI.Hooks.ReloadEventArgs args)
+        {
+            DamageConfigJson.Load();
+
+            args.Player.SendSuccessMessage("[DamageStatistic&Rewards] CONFIG FILE CHARGED");
         }
 
         protected override void Dispose(bool disposing)
@@ -51,6 +59,10 @@ namespace DamageStatistic
                 ServerApi.Hooks.NpcKilled.Deregister(this, OnNpcKill);
                 ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
                 ActiveBosses.Clear();
+
+                Commands.ChatCommands.RemoveAll(c => c.HasAlias("damagelang"));
+                TShockAPI.Hooks.GeneralHooks.ReloadEvent -= OnReload;
+
             }
             base.Dispose(disposing);
         }
@@ -81,11 +93,14 @@ namespace DamageStatistic
         {
             if (args.Npc == null || !args.Npc.active || (!args.Npc.boss && !IsBossPart(args.Npc))) return;
 
-            if (!ActiveBosses.TryGetValue(args.Npc.whoAmI, out var tracker))
+            if (args.Player == null) return;
+
+            int bossKey = args.Npc.realLife != -1 ? args.Npc.realLife : args.Npc.whoAmI;
+
+            if (!ActiveBosses.TryGetValue(bossKey, out var tracker))
             {
-                // Inicia el contador para el DPS
-                tracker = new BossRecord { NpcId = args.Npc.whoAmI, StartTime = DateTime.UtcNow };
-                ActiveBosses[args.Npc.whoAmI] = tracker;
+                tracker = new BossRecord { NpcId = bossKey, StartTime = DateTime.UtcNow };
+                ActiveBosses[bossKey] = tracker;
             }
 
             string pName = args.Player.name;
@@ -96,16 +111,29 @@ namespace DamageStatistic
         private void OnNpcKill(NpcKilledEventArgs args)
         {
             if (args.npc == null) return;
-            if (ActiveBosses.TryGetValue(args.npc.whoAmI, out var tracker))
+
+            int bossKey = args.npc.realLife != -1 ? args.npc.realLife : args.npc.whoAmI;
+
+            if (args.npc.realLife != -1 || IsBossPart(args.npc))
+            {
+                bool bossStillAlive = Main.npc.Any(n =>
+                    n.active &&
+                    n.whoAmI != args.npc.whoAmI &&
+                    (n.realLife == bossKey || (n.type == args.npc.type && IsBossPart(n)))
+                );
+
+                if (bossStillAlive) return;
+            }
+
+            if (ActiveBosses.TryGetValue(bossKey, out var tracker))
             {
                 ProcessBossKill(args.npc, tracker);
-                ActiveBosses.Remove(args.npc.whoAmI);
+                ActiveBosses.Remove(bossKey);
             }
         }
 
         private void ProcessBossKill(NPC npc, BossRecord tracker)
         {
-            if (!DamageConfigJson.Config.ShowDamage) return;
 
             double totalDamage = tracker.PlayerDamage.Values.Sum();
             if (totalDamage <= 0) return;
@@ -121,32 +149,34 @@ namespace DamageStatistic
 
             if (onlineRecords.Count == 0) return;
 
-            // Transmitir estadísticas
-            foreach (var player in TShock.Players.Where(p => p != null && p.Active))
+            if (DamageConfigJson.Config.ShowDamage)
             {
-                for (int i = 0; i < onlineRecords.Count; i++)
+                foreach (var player in TShock.Players.Where(p => p != null && p.Active))
                 {
-                    int rank = onlineRecords.Count - i;
-                    var rec = onlineRecords[i];
-                    double pct = (rec.Damage / totalDamage) * 100;
-                    int dps = (int)(rec.Damage / totalSeconds);
-
-                    string nameFmt = rec.Name;
-                    if (rank == 1) nameFmt = Rainbow(rec.Name);
-                    else if (rank == 2) nameFmt = $"[c/808080:{rec.Name}]";
-                    else if (rank == 3) nameFmt = $"[c/FFA500:{rec.Name}]";
-
-                    if (rank <= 3)
+                    for (int i = 0; i < onlineRecords.Count; i++)
                     {
-                        string key = $"RANK_{rank}";
-                        player.SendMessage(DamageRewardsi18s.GetText(player, key, nameFmt, rec.Damage, pct.ToString("0.00"), dps), Color.White);
+                        int rank = onlineRecords.Count - i;
+                        var rec = onlineRecords[i];
+                        double pct = (rec.Damage / totalDamage) * 100;
+                        int dps = (int)(rec.Damage / totalSeconds);
+
+                        string nameFmt = rec.Name;
+                        if (rank == 1) nameFmt = Rainbow(rec.Name);
+                        else if (rank == 2) nameFmt = $"[c/808080:{rec.Name}]";
+                        else if (rank == 3) nameFmt = $"[c/FFA500:{rec.Name}]";
+
+                        if (rank <= 3)
+                        {
+                            string key = $"RANK_{rank}";
+                            player.SendMessage(DamageRewardsi18s.GetText(player, key, nameFmt, rec.Damage, pct.ToString("0.00"), dps), Color.White);
+                        }
+                        else
+                        {
+                            player.SendMessage(DamageRewardsi18s.GetText(player, "RANK_FORMAT", rank, nameFmt, rec.Damage, pct.ToString("0.00"), dps), Color.White);
+                        }
                     }
-                    else
-                    {
-                        player.SendMessage(DamageRewardsi18s.GetText(player, "RANK_FORMAT", rank, nameFmt, rec.Damage, pct.ToString("0.00"), dps), Color.White);
-                    }
+                    player.SendMessage(DamageRewardsi18s.GetText(player, "TOP_DAMAGE_HEADER", npc.FullName.ToUpper()), Color.LimeGreen);
                 }
-                player.SendMessage(DamageRewardsi18s.GetText(player, "TOP_DAMAGE_HEADER", npc.FullName.ToUpper()), Color.LimeGreen);
             }
 
             // Procesar Recompensas
